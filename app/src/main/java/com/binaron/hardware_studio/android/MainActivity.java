@@ -27,6 +27,8 @@ import java.util.UUID;
  */
 public class MainActivity extends Activity {
     final static public UUID ArduinoUUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    //final static public UUID ArduinoUUID = UUID.fromString("");
+
     final static String LOG_TAG = "MainActivity";
     final static int REQUEST_ENABLE_BT = 1;
     final static int STOP = 48;
@@ -112,7 +114,9 @@ public class MainActivity extends Activity {
 
     private void connect(){
         try {
-            BluetoothDevice bluetoothDevice = bluetoothAdapter.getRemoteDevice("98:D3:31:B1:37:04");
+            //BluetoothDevice bluetoothDevice = bluetoothAdapter.getRemoteDevice("98:D3:31:B1:37:04");
+            BluetoothDevice bluetoothDevice = bluetoothAdapter.getRemoteDevice("20:15:02:28:09:58");
+
             bluetoothSocket = bluetoothDevice.createInsecureRfcommSocketToServiceRecord(ArduinoUUID);
             bluetoothSocket.connect();
             outputStream = bluetoothSocket.getOutputStream();
@@ -145,10 +149,11 @@ public class MainActivity extends Activity {
                 float axisZ = event.values[2];
                 information.setText(Float.toString(axisX)+"\n"+Float.toString(axisY)+"\n"+Float.toString(axisZ)+"\n");
                 if(axisY < -5){
-                    command = LEFT;
+                    command = RIGHT;
                 }
                 else if(axisY > 5){
-                    command = RIGHT;
+
+                    command = LEFT;
                 }
                 else if(axisZ > 6){
                     command = FORWARD;
