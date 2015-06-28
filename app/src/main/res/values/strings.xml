@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Android</string>
+    <string name="action_control">Go</string>
+    <string name="action_disconnect">Disconnect</string>
 </resources>

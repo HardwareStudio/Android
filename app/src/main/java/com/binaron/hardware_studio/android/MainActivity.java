@@ -3,60 +3,81 @@ package com.binaron.hardware_studio.android;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
-import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
 import android.content.Context;
 import android.content.Intent;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
-import android.widget.ArrayAdapter;
-import android.widget.ListView;
+import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.Set;
 import java.util.UUID;
 
 /**
  * Created by Eric on 2015/6/23.
  */
-public class MainActivity extends Activity{
+public class MainActivity extends Activity {
+    final static public UUID ArduinoUUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     final static String LOG_TAG = "MainActivity";
     final static int REQUEST_ENABLE_BT = 1;
-    // Name for the SDP record when creating server socket
-    private static final String NAME_SECURE = "BluetoothChatSecure";
-    private static final String NAME_INSECURE = "BluetoothChatInsecure";
+    final static int STOP = 48;
+    final static int FORWARD = 49;
+    final static int BACK = 50;
+    final static int LEFT = 51;
+    final static int RIGHT = 52;
 
-    // Unique UUID for this application
-    public static final UUID MY_UUID_SECURE = UUID.fromString("fa87c0d0-afac-11de-8a39-0800200c9a66");
-    public static final UUID MY_UUID_INSECURE = UUID.fromString("8ce255c0-200a-11e0-ac64-0800200c9a66");
-
-    // Constants that indicate the current connection state
-    public static final int STATE_NONE = 0;       // we're doing nothing
-    public static final int STATE_LISTEN = 1;     // now listening for incoming connections
-    public static final int STATE_CONNECTING = 2; // now initiating an outgoing connection
-    public static final int STATE_CONNECTED = 3;  // now connected to a remote device
-
+    private int lastCommand = STOP;
+    private int command = STOP;
+    private boolean go = false;
+    private TextView information;
+    private ImageButton goButton;
     private BluetoothAdapter bluetoothAdapter;
-    private DeviceAdapter deviceAdapter;
-    private int mState;
-    private AcceptThread acceptThread;
-    private BluetoothDevice bluetoothDevice;
     private BluetoothSocket bluetoothSocket;
+    private SensorManager sensorManager;
+    private Sensor sensor;
     private OutputStream outputStream;
 
     @Override
     public void onCreate(Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
         setContentView(R.layout.layout_activity_main);
-        deviceAdapter = new DeviceAdapter(this, R.layout.layout_activity_main_row);
-        mState = STATE_NONE;
-        ListView listView = (ListView)findViewById(R.id.main_list_view);
-        listView.setAdapter(deviceAdapter);
+        information = (TextView) findViewById(R.id.information);
+        goButton = (ImageButton) findViewById(R.id.go);
+        goButton.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getAction()){
+                    case MotionEvent.ACTION_DOWN:
+                        go = true;
+                        //Log.d("MotionEvent", "ACTION_DOWN");
+                        break;
+                    case MotionEvent.ACTION_UP:
+                        if(bluetoothSocket.isConnected()) {
+                            try {
+                                command = STOP;
+                                outputStream.write(command);
+                                lastCommand = command;
+                                Log.d("OutputStream", "send command : " + command);
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                        go = false;
+                        //Log.d("MotionEvent", "ACTION_UP");
+                        break;
+                }
+                return false;
+            }
+        });
 
         // check if bluetooth is supported by the device
         bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
@@ -71,148 +92,94 @@ public class MainActivity extends Activity{
             startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
         }
 
-//        bluetoothDevice = bluetoothAdapter.getRemoteDevice("98:D3:31:B1:37:04");
-//        try {
-//            bluetoothSocket = bluetoothDevice.createRfcommSocketToServiceRecord(MainActivity.MY_UUID_SECURE);
-//            bluetoothSocket.connect();
-//            Toast.makeText(this, "connect success", Toast.LENGTH_SHORT).show();
-//            outputStream = bluetoothSocket.getOutputStream();
-//        }
-//        catch (Exception e){
-//            Log.d(LOG_TAG, e.toString());
-//        }
-
-        acceptThread = new AcceptThread(false);
-        acceptThread.start();
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        sensor = sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY);
     }
 
     @Override
-    protected void onResume(){
+    protected  void onResume(){
+        connect();
+        sensorManager.registerListener(sensorEventListener, sensor, SensorManager.SENSOR_DELAY_UI);
         super.onResume();
-        // get bluetooth device
-        Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
-        deviceAdapter.clear();
-        for (BluetoothDevice bluetoothDevice : pairedDevices){
-            deviceAdapter.add(bluetoothDevice);
+    }
+
+    @Override
+    protected void onStop(){
+        sensorManager.unregisterListener(sensorEventListener);
+        disconnect();
+        super.onStop();
+    }
+
+    private void connect(){
+        try {
+            BluetoothDevice bluetoothDevice = bluetoothAdapter.getRemoteDevice("98:D3:31:B1:37:04");
+            bluetoothSocket = bluetoothDevice.createInsecureRfcommSocketToServiceRecord(ArduinoUUID);
+            bluetoothSocket.connect();
+            outputStream = bluetoothSocket.getOutputStream();
+            Toast.makeText(this, "connect success", Toast.LENGTH_SHORT).show();
+        }
+        catch (Exception e){
+            Toast.makeText(this, "connect fail", Toast.LENGTH_SHORT).show();
+            Log.d(LOG_TAG, e.toString());
         }
     }
 
-    class DeviceAdapter extends ArrayAdapter<BluetoothDevice>{
-
-        class ViewHolder{
-            public TextView name;
-            public TextView mac;
+    private void disconnect(){
+        try {
+            if (bluetoothSocket.isConnected()) {
+                outputStream.write(STOP);
+                bluetoothSocket.close();
+                Log.d(LOG_TAG, "connect close");
+            }
+        } catch (Exception e) {
+            Log.d(LOG_TAG, e.toString());
         }
+    }
 
-        public DeviceAdapter(Context context, int resource){
-            super(context, resource);
-        }
-
+    final SensorEventListener sensorEventListener = new SensorEventListener(){
         @Override
-        public View getView(int position, View convertView, ViewGroup parent){
-            ViewHolder viewHolder;
-
-            if (convertView == null) {
-                convertView = getLayoutInflater().inflate(R.layout.layout_activity_main_row, null);
-                viewHolder = new ViewHolder();
-                viewHolder.name = (TextView)convertView.findViewById(R.id.main_list_item_name);
-                viewHolder.mac = (TextView)convertView.findViewById(R.id.main_list_item_mac);
-                convertView.setTag(viewHolder);
-            } else {
-                viewHolder = (ViewHolder)convertView.getTag();
-            }
-
-            final BluetoothDevice device = getItem(position);
-            viewHolder.name.setText(device.getName());
-            viewHolder.mac.setText(device.getAddress());
-
-            convertView.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    Intent intent = new Intent();
-                    intent.setClass(v.getContext(), ConnectActivity.class);
-                    intent.putExtra("mac", device.getAddress());
-                    v.getContext().startActivity(intent);
+        public void onSensorChanged(SensorEvent event){
+            if(event.sensor.getType() == Sensor.TYPE_GRAVITY){
+                float axisX = event.values[0];
+                float axisY = event.values[1];
+                float axisZ = event.values[2];
+                information.setText(Float.toString(axisX)+"\n"+Float.toString(axisY)+"\n"+Float.toString(axisZ)+"\n");
+                if(axisY < -5){
+                    command = LEFT;
                 }
-            });
-
-            return convertView;
-        }
-    }
-
-    private class AcceptThread extends Thread {
-        // The local server socket
-        private final BluetoothServerSocket mmServerSocket;
-        private String mSocketType;
-
-        public AcceptThread(boolean secure) {
-            BluetoothServerSocket tmp = null;
-            mSocketType = secure ? "Secure" : "Insecure";
-
-            // Create a new listening server socket
-            try {
-                if (secure) {
-                    tmp = bluetoothAdapter.listenUsingRfcommWithServiceRecord(NAME_SECURE, MY_UUID_SECURE);
-                } else {
-                    tmp = bluetoothAdapter.listenUsingInsecureRfcommWithServiceRecord(
-                            NAME_INSECURE, MY_UUID_INSECURE);
+                else if(axisY > 5){
+                    command = RIGHT;
                 }
-            } catch (IOException e) {
-                Log.e(LOG_TAG, "Socket Type: " + mSocketType + "listen() failed", e);
-            }
-            mmServerSocket = tmp;
-        }
-
-        public void run() {
-            Log.d(LOG_TAG, "Socket Type: " + mSocketType + "BEGIN mAcceptThread" + this);
-            setName("AcceptThread " + mSocketType);
-
-            BluetoothSocket socket;
-
-            // Listen to the server socket if we're not connected
-            while (mState != STATE_CONNECTED) {
-                Log.d(LOG_TAG, "run");
-                try {
-                    // This is a blocking call and will only return on a
-                    // successful connection or an exception
-                    socket = mmServerSocket.accept();
-                    Log.d(LOG_TAG, "Socket Type: " + mSocketType + "accept() success");
-                } catch (IOException e) {
-                    Log.e(LOG_TAG, "Socket Type: " + mSocketType + "accept() failed", e);
-                    break;
+                else if(axisZ > 6){
+                    command = FORWARD;
+                }
+                else if(axisZ < 5){
+                    command = BACK;
+                }
+                else {
+                    command = STOP;
                 }
 
-                // If a connection was accepted
-                if (socket != null) {
-                    switch (mState) {
-                        case STATE_LISTEN:
-                        case STATE_CONNECTING:
-                            // Situation normal. Start the connected thread.
-//                            connected(socket, socket.getRemoteDevice(), mSocketType);
-                            break;
-                        case STATE_NONE:
-                        case STATE_CONNECTED:
-                            // Either not ready or already connected. Terminate new socket.
-                            try {
-                                socket.close();
-                            } catch (IOException e) {
-                                Log.e(LOG_TAG, "Could not close unwanted socket", e);
+                if(bluetoothSocket.isConnected()) {
+                    try {
+                        if (go) {
+                            if(command != lastCommand) {
+                                outputStream.write(command);
+                                lastCommand = command;
+                                Log.d("OutputStream", "send command : " + command);
                             }
-                            break;
+                        }
+                    } catch (IOException e) {
+                        e.printStackTrace();
                     }
                 }
             }
-            Log.i(LOG_TAG, "END mAcceptThread, socket Type: " + mSocketType);
-
         }
 
-        public void cancel() {
-            Log.d(LOG_TAG, "Socket Type" + mSocketType + "cancel " + this);
-            try {
-                mmServerSocket.close();
-            } catch (IOException e) {
-                Log.e(LOG_TAG, "Socket Type" + mSocketType + "close() of server failed", e);
-            }
+        @Override
+        public void onAccuracyChanged(Sensor sensor , int accuracy){
+            //Log.i("Sensor", "onAccuracyChanged");
         }
-    }
+    };
+
 }
